@@ -1,7 +1,8 @@
 /* ---------- инфраструктура состояния ---------- */
 const KEY='biennale2027.v2', CFG=window.CFG||{}, D_=window.DATA;
 const NOW=new Date(); NOW.setHours(0,0,0,0);
-const TODAY=NOW.toISOString().slice(0,10);
+const iso=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+const TODAY=iso(NOW);
 const WD=['вс','пн','вт','ср','чт','пт','сб'];
 const MN=['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
 const D=s=>new Date(s+'T00:00:00');
@@ -272,3 +273,9 @@ if(window.matchMedia){
   const onTheme=()=>renderTimeline();
   mq.addEventListener?mq.addEventListener('change',onTheme):mq.addListener(onTheme);
 }
+
+/* если дашборд открыт круглосуточно — пересчёт после полуночи */
+setInterval(()=>{
+  const d=new Date(); d.setHours(0,0,0,0);
+  if(d.getTime()!==NOW.getTime()) location.reload();
+},60000);
