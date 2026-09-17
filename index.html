@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<title>Биеннале 2027 — командный дашборд</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='50' font-size='52'>🌿</text></svg>">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="navbar">
+  <div class="nav-inner">
+    <a class="brand" href="#top">🌿 Биеннале 2027</a>
+    <div class="btns">
+      <span id="sync" class="sync">…</span>
+      <button id="whoBtn" class="ghost">👤 <span id="whoName">гость</span></button>
+      <button id="pullBtn" class="primary">Обновить</button>
+      <button id="expBtn" class="ghost">Экспорт</button>
+      <button id="impBtn" class="ghost">Импорт</button>
+      <input type="file" id="impFile" accept=".json" hidden>
+      <button id="printBtn" class="ghost">PDF</button>
+    </div>
+  </div>
+</div>
+
+<header class="hero" id="top">
+  <p class="eyebrow">Подготовка сезона</p>
+  <h1>Международная биеннале<br>экологического искусства 2027</h1>
+  <p class="lede">Лонглист → шортлист → договоры → логистика → монтаж → сезон.<br>
+  Единый трек для всей команды. Сегодня <b id="today"></b></p>
+</header>
+
+<nav aria-label="Разделы">
+  <div class="seg">
+    <button class="on" data-t="gates">Дедлайны</button>
+    <button data-t="projects">Проекты</button>
+    <button data-t="timeline">Таймлайн</button>
+    <button data-t="risks">Риски</button>
+    <button data-t="team">Команда</button>
+  </div>
+</nav>
+
+<main>
+  <section id="gates" class="on">
+    <div class="kpis" id="kpis"></div>
+    <h2>Ключевые гейты</h2>
+    <p class="hint">Гейт считается закрытым, когда закрыты все пункты чек-листа. Статусы, ответственные и заметки видны всей команде.</p>
+    <div id="gateList"></div>
+    <h2>Производные дедлайны <span class="pill prop">предложения</span></h2>
+    <div id="propList"></div>
+  </section>
+
+  <section id="projects">
+    <h2>Проекты сезона</h2>
+    <div class="ctrls">
+      <select id="fType">
+        <option value="">Все форматы</option><option>основной проект</option><option>специальный проект</option>
+        <option>мультимедийный проект</option><option>диджитал-арт</option><option>внешнее</option>
+      </select>
+      <input type="text" id="fQ" placeholder="Поиск: площадка, куратор, проект">
+    </div>
+    <div class="panel tw"><table><thead><tr><th>№</th><th>Проект</th><th>Площадка</th><th>Формат</th><th>Кураторы</th><th>Даты 2027</th><th>Пересечения</th></tr></thead>
+    <tbody id="projRows"></tbody></table></div>
+  </section>
+
+  <section id="timeline">
+    <h2>Сентябрь 2026 — октябрь 2027</h2>
+    <div class="gantt">
+      <div class="gmonths"><div></div><div class="gm" id="gm"></div></div>
+      <div id="gRows"></div>
+      <div class="legend">
+        <span><i class="c-main"></i>основной</span><span><i class="c-spec"></i>спецпроект</span>
+        <span><i class="c-media"></i>медиа и диджитал</span><span><i class="c-ext"></i>внешнее</span>
+        <span><i class="c-prep"></i>подготовка и монтаж</span>
+        <span><i class="dia"></i>гейт</span><span><i class="line"></i>сегодня</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="risks">
+    <h2>Конфликты и риски</h2>
+    <p class="hint">Отсортировано по приоритету. Решение, владельца и срок вписывайте в поле под каждым риском.</p>
+    <div id="riskList"></div>
+  </section>
+
+  <section id="team">
+    <h2>Команда и владельцы гейтов</h2>
+    <p class="hint">Общий редактируемый список — сохраняется для всех.</p>
+    <textarea class="note big" data-k="team:roster" placeholder="Имя — роль — зона ответственности — контакт"></textarea>
+    <h2>Решения недели</h2>
+    <textarea class="note big" data-k="team:decisions" placeholder="Дата — решение — кто — срок"></textarea>
+    <h2>Журнал изменений</h2>
+    <div id="log" class="panel pad"></div>
+  </section>
+</main>
+
+<footer>
+  Внутренний рабочий инструмент. Данные синхронизируются через Google Sheets.<br>
+  Не публикуйте ссылку за пределами команды.
+</footer>
+
+<script src="config.js"></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
