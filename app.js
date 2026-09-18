@@ -79,18 +79,13 @@ function renderKPI(){
     <div class="n" data-val="${esc(x.n)}">${esc(x.n)}</div><div class="d">${esc(x.d)}</div></div>`).join('');
   countUp();
 }
-/* плавный счёт чисел в KPI */
 function countUp(){
   if(matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   document.querySelectorAll('.kpi .n').forEach(el=>{
-    const raw=el.dataset.val, m=raw.match(/^(-?\d+)(.*)$/);
-    if(!m) return;
+    const m=el.dataset.val.match(/^(-?\d+)(.*)$/); if(!m) return;
     const target=+m[1], suffix=m[2], t0=performance.now(), dur=750;
-    const step=t=>{
-      const p=Math.min((t-t0)/dur,1), e=1-Math.pow(1-p,3);
-      el.textContent=Math.round(target*e)+suffix;
-      if(p<1) requestAnimationFrame(step);
-    };
+    const step=t=>{const p=Math.min((t-t0)/dur,1), e=1-Math.pow(1-p,3);
+      el.textContent=Math.round(target*e)+suffix; if(p<1) requestAnimationFrame(step)};
     el.textContent='0'+suffix; requestAnimationFrame(step);
   });
 }
@@ -99,7 +94,7 @@ function countUp(){
 function badge(date,st){
   const d=days(date);
   if(st==='done') return '<span class="dbadge past">закрыто</span>';
-  const c=d<0||d<30?'hot':d<75?'warn':'';
+  const c=(d<0||d<30)?'hot':d<75?'warn':'';
   return `<span class="dbadge ${c}">${d<0?'просрочено '+(-d)+' дн.':d+' дн.'}</span>`;
 }
 function gateCard(g,prop,i){
@@ -119,8 +114,10 @@ function gateCard(g,prop,i){
   </div>
   ${chk.length?`<div class="bar"><i style="width:${done/chk.length*100}%"></i></div>
   <ul class="chk">${chk.map((c,n)=>{const key=`chk:${g.id}-${n}`,on=getV(key,false);
-    return `<li class="${on?'done':''}"><input type="checkbox" data-k="${key}" ${on?'checked':''}>
-    <span>${esc(c)}${on&&byOf(key)?`<span class="by">— ${esc(byOf(key))}</span>`:''}</span></li>`}).join('')}</ul>`:''}
+    return `<li><label class="chkrow ${on?'done':''}">
+      <input type="checkbox" data-k="${key}" ${on?'checked':''}>
+      <span class="chktx">${esc(c)}${on&&byOf(key)?`<span class="by">— ${esc(byOf(key))}</span>`:''}</span>
+    </label></li>`}).join('')}</ul>`:''}
   <textarea class="note" data-k="note:${g.id}" placeholder="Заметки, блокеры, решения">${esc(getV('note:'+g.id,''))}</textarea>
   </div>`;
 }
@@ -145,10 +142,61 @@ function renderProjects(){
       <td data-label="Риски">${p.x?'⚠️ '+esc(p.x):'—'}</td></tr>`).join('');
 }
 
-/* ---------- таймлайн с зумом ---------- */
+/* ---------- таймлайн ---------- */
 const T0=D('2026-09-01'), T1=D('2027-11-01');
+const SPAN_DAYS=Math.round((T1-T0)/864e5);
 const pos=d=>((D(d)-T0)/(T1-T0))*100;
 let ZOOM=Math.min(6,Math.max(1,parseFloat(store.get('biennale.zoom')||'1')));
+
+/* шкала: месяцы всегда, при приближении — недели и дни */
+function buildScale(){
+  const gm=document.getElementById('gm'), inner=document.getElementById('ginner');
+  if(!gm||!inner) return;
+  const labW=parseInt(cssv('--lab-w'))||250;
+  const trackW=Math.max(inner.offsetWidth-labW-12,200);
+  const ppd=trackW/SPAN_DAYS;                       // пикселей на день
+
+  let months='';
+  for(let y=2026,m=8;!(y===2027&&m===10);m++){
+    if(m>11){m=0;y++}
+    const s=`${y}-${String(m+1).padStart(2,'0')}-01`;
+    const nx=m===11?`${y+1}-01-01`:`${y}-${String(m+2).padStart(2,'0')}-01`;
+    const w=pos(nx)-pos(s);
+    const full=`${MN[m]} ${String(y).slice(2)}`;
+    months+=`<span style="left:${pos(s)}%;width:${w}%" title="${full}">${ppd>1.4?full:MN[m]}</span>`;
+  }
+
+  let sub='', mode='';
+  if(ppd>=13){                                      // дни
+    mode='days';
+    const every=ppd>=26?1:(ppd>=18?2:3);
+    const cur=new Date(T0);
+    while(cur<T1){
+      const s=iso(cur), dow=cur.getDay(), dn=cur.getDate();
+      const showText=(dn===1)||((dn-1)%every===0)||dow===1;
+      sub+=`<span class="${dow===0||dow===6?'we':''} ${s===TODAY?'now':''}"
+        style="left:${pos(s)}%;width:${100/SPAN_DAYS}%" title="${fmt(s)}">${showText?dn:''}</span>`;
+      cur.setDate(dn+1);
+    }
+  } else if(ppd>=4.2){                              // недели, метка по понедельникам
+    mode='weeks';
+    const cur=new Date(T0);
+    cur.setDate(cur.getDate()+((8-cur.getDay())%7));
+    while(cur<T1){
+      const s=iso(cur);
+      const txt=ppd>=7?`${cur.getDate()}.${String(cur.getMonth()+1).padStart(2,'0')}`:cur.getDate();
+      sub+=`<span class="${s===TODAY?'now':''}" style="left:${pos(s)}%;width:${700/SPAN_DAYS}%"
+        title="неделя с ${fmt(s)}">${txt}</span>`;
+      cur.setDate(cur.getDate()+7);
+    }
+  }
+
+  gm.className='gm'+(mode?' has-sub':'');
+  gm.innerHTML=
+    `<div class="gm-row gm-months">${months}</div>`+
+    (mode?`<div class="gm-row gm-sub ${mode}">${sub}</div>`:'')+
+    `<div class="today" style="left:${pos(TODAY)}%" title="Сегодня — ${fmt(TODAY)}"></div>`;
+}
 
 function applyZoom(){
   const inner=document.getElementById('ginner'), scroll=document.getElementById('gscroll');
@@ -160,12 +208,12 @@ function applyZoom(){
   if(r) r.value=Math.round(ZOOM*100);
   if(v) v.textContent=Math.round(ZOOM*100)+'%';
   store.set('biennale.zoom',String(ZOOM));
-  requestAnimationFrame(fixLabels);
+  requestAnimationFrame(()=>{buildScale();fixLabels()});
 }
 function setZoom(z,keepToday){
   const scroll=document.getElementById('gscroll');
   const anchor=scroll?(scroll.scrollLeft+scroll.clientWidth/2)/Math.max(scroll.scrollWidth,1):0;
-  ZOOM=Math.min(6,Math.max(1,z));
+  ZOOM=Math.min(6,Math.max(1,Math.round(z*10)/10));
   applyZoom();
   if(scroll){
     if(keepToday) scrollToToday();
@@ -176,11 +224,9 @@ function scrollToToday(){
   const scroll=document.getElementById('gscroll'), inner=document.getElementById('ginner');
   if(!scroll||!inner) return;
   const labW=parseInt(cssv('--lab-w'))||250;
-  const trackW=inner.offsetWidth-labW-12;
-  const x=labW+trackW*pos(TODAY)/100;
+  const x=labW+(inner.offsetWidth-labW-12)*pos(TODAY)/100;
   scroll.scrollTo({left:Math.max(0,x-scroll.clientWidth/2),behavior:'smooth'});
 }
-/* короткие полосы: подпись выносится наружу */
 function fixLabels(){
   document.querySelectorAll('.gtrack').forEach(tr=>{
     const b=tr.querySelector('.gbar'), out=tr.querySelector('.gout');
@@ -188,24 +234,14 @@ function fixLabels(){
     const tight=b.clientWidth<56||b.scrollWidth>b.clientWidth+1;
     if(tight){
       b.classList.add('nolabel'); out.hidden=false;
-      out.style.left='0px'; out.style.right='auto';
       const right=b.offsetLeft+b.offsetWidth+8;
-      if(right+out.offsetWidth<=tr.clientWidth-4){ out.style.left=right+'px' }
-      else { out.style.left='auto'; out.style.right=(tr.clientWidth-b.offsetLeft+8)+'px' }
-    } else { b.classList.remove('nolabel'); out.hidden=true }
+      if(right+out.offsetWidth<=tr.clientWidth-4){out.style.left=right+'px';out.style.right='auto'}
+      else {out.style.left='auto';out.style.right=(tr.clientWidth-b.offsetLeft+8)+'px'}
+    } else {b.classList.remove('nolabel'); out.hidden=true}
   });
 }
 function renderTimeline(){
-  let gm='';
-  for(let y=2026,m=8;!(y===2027&&m===10);m++){
-    if(m>11){m=0;y++}
-    const s=`${y}-${String(m+1).padStart(2,'0')}-01`;
-    const nx=m===11?`${y+1}-01-01`:`${y}-${String(m+2).padStart(2,'0')}-01`;
-    gm+=`<span style="left:${pos(s)}%;width:${pos(nx)-pos(s)}%">${MN[m]} ${String(y).slice(2)}</span>`;
-  }
   const tl=`<div class="today" style="left:${pos(TODAY)}%"></div>`;
-  document.getElementById('gm').innerHTML=gm+`<div class="today" style="left:${pos(TODAY)}%" title="Сегодня"></div>`;
-
   const items=[...D_.prep,...D_.projects.filter(p=>p.s)];
   document.getElementById('gRows').innerHTML=items.map((p,i)=>{
     const l=pos(p.s), w=Math.max(pos(p.e)-l,0.35);
@@ -291,7 +327,7 @@ document.getElementById('zIn').onclick=()=>setZoom(ZOOM+0.5);
 document.getElementById('zOut').onclick=()=>setZoom(ZOOM-0.5);
 document.getElementById('zRange').oninput=e=>setZoom(+e.target.value/100);
 document.getElementById('zFit').onclick=()=>setZoom(1);
-document.getElementById('zToday').onclick=scrollToToday;
+document.getElementById('zToday').onclick=()=>{if(ZOOM<2)setZoom(2,true);else scrollToToday()};
 document.getElementById('pullBtn').onclick=()=>pull(false);
 document.getElementById('printBtn').onclick=()=>window.print();
 const doExport=()=>{
@@ -320,7 +356,7 @@ function askName(){
 document.getElementById('whoBtn').onclick=askName;
 
 let rt=null;
-window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{applyZoom()},150)});
+window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(applyZoom,150)});
 window.addEventListener('orientationchange',()=>setTimeout(applyZoom,300));
 
 /* ---------- старт ---------- */
