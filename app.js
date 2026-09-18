@@ -1,4 +1,4 @@
-/* ---------- инфраструктура состояния ---------- */
+/* ---------- состояние ---------- */
 const KEY='biennale2027.v2', CFG=window.CFG||{}, D_=window.DATA;
 const NOW=new Date(); NOW.setHours(0,0,0,0);
 const iso=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
@@ -10,8 +10,10 @@ const days=s=>Math.round((D(s)-NOW)/864e5);
 const fmt=s=>{const d=D(s);return `${d.getDate()} ${MN[d.getMonth()]} ${d.getFullYear()} (${WD[d.getDay()]})`};
 const short=s=>{const d=D(s);return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getFullYear()).slice(2)}`};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const nf=n=>n.toLocaleString('ru-RU');
 const cssv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const col=k=>cssv('--c-'+k)||cssv('--accent')||'#0071e3';
+const RM=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const LS=(()=>{try{localStorage.setItem('__t','1');localStorage.removeItem('__t');return localStorage}catch(e){return null}})();
 const mem={};
@@ -24,7 +26,6 @@ let me=store.get('biennale.me')||'';
 const getV=(k,d='')=>cells[k]&&cells[k].v!==undefined?cells[k].v:d;
 const byOf=k=>cells[k]&&cells[k].by||'';
 const saveLocal=()=>store.set(KEY,JSON.stringify(cells));
-
 const queue=new Set(); let pushTimer=null;
 function setV(k,v){
   cells[k]={v,ts:Date.now(),by:me||'гость'};
@@ -77,17 +78,20 @@ function renderKPI(){
   document.getElementById('kpis').innerHTML=k.map((x,i)=>
    `<div class="kpi ${x.c}" style="--i:${i}"><div class="l">${x.l}</div>
     <div class="n" data-val="${esc(x.n)}">${esc(x.n)}</div><div class="d">${esc(x.d)}</div></div>`).join('');
-  countUp();
+  document.querySelectorAll('.kpi .n').forEach(el=>animNum(el,el.dataset.val));
 }
-function countUp(){
-  if(matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  document.querySelectorAll('.kpi .n').forEach(el=>{
-    const m=el.dataset.val.match(/^(-?\d+)(.*)$/); if(!m) return;
-    const target=+m[1], suffix=m[2], t0=performance.now(), dur=750;
-    const step=t=>{const p=Math.min((t-t0)/dur,1), e=1-Math.pow(1-p,3);
-      el.textContent=Math.round(target*e)+suffix; if(p<1) requestAnimationFrame(step)};
-    el.textContent='0'+suffix; requestAnimationFrame(step);
-  });
+/* универсальный счётчик: принимает "173 147", "35", ">200", "42 дн." */
+function animNum(el,raw,dur){
+  if(RM()){el.textContent=raw;return}
+  const m=String(raw).replace(/\s/g,'').match(/^(\D*)(-?\d+)(.*)$/);
+  if(!m){el.textContent=raw;return}
+  const pre=m[1],target=+m[2],suf=m[3],t0=performance.now(),T=dur||900;
+  const step=t=>{
+    const p=Math.min((t-t0)/T,1), e=1-Math.pow(1-p,3);
+    el.textContent=pre+nf(Math.round(target*e))+suf;
+    if(p<1) requestAnimationFrame(step);
+  };
+  el.textContent=pre+'0'+suf; requestAnimationFrame(step);
 }
 
 /* ---------- гейты ---------- */
@@ -147,57 +151,44 @@ const T0=D('2026-09-01'), T1=D('2027-11-01');
 const SPAN_DAYS=Math.round((T1-T0)/864e5);
 const pos=d=>((D(d)-T0)/(T1-T0))*100;
 let ZOOM=Math.min(6,Math.max(1,parseFloat(store.get('biennale.zoom')||'1')));
-
-/* шкала: месяцы всегда, при приближении — недели и дни */
 function buildScale(){
   const gm=document.getElementById('gm'), inner=document.getElementById('ginner');
   if(!gm||!inner) return;
   const labW=parseInt(cssv('--lab-w'))||250;
-  const trackW=Math.max(inner.offsetWidth-labW-12,200);
-  const ppd=trackW/SPAN_DAYS;                       // пикселей на день
-
+  const ppd=Math.max(inner.offsetWidth-labW-12,200)/SPAN_DAYS;
   let months='';
   for(let y=2026,m=8;!(y===2027&&m===10);m++){
     if(m>11){m=0;y++}
     const s=`${y}-${String(m+1).padStart(2,'0')}-01`;
     const nx=m===11?`${y+1}-01-01`:`${y}-${String(m+2).padStart(2,'0')}-01`;
-    const w=pos(nx)-pos(s);
     const full=`${MN[m]} ${String(y).slice(2)}`;
-    months+=`<span style="left:${pos(s)}%;width:${w}%" title="${full}">${ppd>1.4?full:MN[m]}</span>`;
+    months+=`<span style="left:${pos(s)}%;width:${pos(nx)-pos(s)}%" title="${full}">${ppd>1.4?full:MN[m]}</span>`;
   }
-
-  let sub='', mode='';
-  if(ppd>=13){                                      // дни
+  let sub='',mode='';
+  if(ppd>=13){
     mode='days';
-    const every=ppd>=26?1:(ppd>=18?2:3);
-    const cur=new Date(T0);
+    const every=ppd>=26?1:(ppd>=18?2:3), cur=new Date(T0);
     while(cur<T1){
-      const s=iso(cur), dow=cur.getDay(), dn=cur.getDate();
-      const showText=(dn===1)||((dn-1)%every===0)||dow===1;
-      sub+=`<span class="${dow===0||dow===6?'we':''} ${s===TODAY?'now':''}"
-        style="left:${pos(s)}%;width:${100/SPAN_DAYS}%" title="${fmt(s)}">${showText?dn:''}</span>`;
+      const s=iso(cur),dow=cur.getDay(),dn=cur.getDate();
+      const show=(dn===1)||((dn-1)%every===0)||dow===1;
+      sub+=`<span class="${dow===0||dow===6?'we':''} ${s===TODAY?'now':''}" style="left:${pos(s)}%;width:${100/SPAN_DAYS}%" title="${fmt(s)}">${show?dn:''}</span>`;
       cur.setDate(dn+1);
     }
-  } else if(ppd>=4.2){                              // недели, метка по понедельникам
+  } else if(ppd>=4.2){
     mode='weeks';
-    const cur=new Date(T0);
-    cur.setDate(cur.getDate()+((8-cur.getDay())%7));
+    const cur=new Date(T0); cur.setDate(cur.getDate()+((8-cur.getDay())%7));
     while(cur<T1){
       const s=iso(cur);
       const txt=ppd>=7?`${cur.getDate()}.${String(cur.getMonth()+1).padStart(2,'0')}`:cur.getDate();
-      sub+=`<span class="${s===TODAY?'now':''}" style="left:${pos(s)}%;width:${700/SPAN_DAYS}%"
-        title="неделя с ${fmt(s)}">${txt}</span>`;
+      sub+=`<span class="${s===TODAY?'now':''}" style="left:${pos(s)}%;width:${700/SPAN_DAYS}%" title="неделя с ${fmt(s)}">${txt}</span>`;
       cur.setDate(cur.getDate()+7);
     }
   }
-
   gm.className='gm'+(mode?' has-sub':'');
-  gm.innerHTML=
-    `<div class="gm-row gm-months">${months}</div>`+
+  gm.innerHTML=`<div class="gm-row gm-months">${months}</div>`+
     (mode?`<div class="gm-row gm-sub ${mode}">${sub}</div>`:'')+
     `<div class="today" style="left:${pos(TODAY)}%" title="Сегодня — ${fmt(TODAY)}"></div>`;
 }
-
 function applyZoom(){
   const inner=document.getElementById('ginner'), scroll=document.getElementById('gscroll');
   if(!inner||!scroll) return;
@@ -236,7 +227,7 @@ function fixLabels(){
       b.classList.add('nolabel'); out.hidden=false;
       const right=b.offsetLeft+b.offsetWidth+8;
       if(right+out.offsetWidth<=tr.clientWidth-4){out.style.left=right+'px';out.style.right='auto'}
-      else {out.style.left='auto';out.style.right=(tr.clientWidth-b.offsetLeft+8)+'px'}
+      else{out.style.left='auto';out.style.right=(tr.clientWidth-b.offsetLeft+8)+'px'}
     } else {b.classList.remove('nolabel'); out.hidden=true}
   });
 }
@@ -245,8 +236,7 @@ function renderTimeline(){
   const items=[...D_.prep,...D_.projects.filter(p=>p.s)];
   document.getElementById('gRows').innerHTML=items.map((p,i)=>{
     const l=pos(p.s), w=Math.max(pos(p.e)-l,0.35);
-    const lab=esc(p.dt||`${short(p.s)} — ${short(p.e)}`);
-    const tip=esc(p.t)+' · '+lab;
+    const lab=esc(p.dt||`${short(p.s)} — ${short(p.e)}`), tip=esc(p.t)+' · '+lab;
     return `<div class="grow"><div class="glab" title="${tip}">${esc(p.t)}</div>
      <div class="gtrack">
        <div class="gbar" style="left:${l}%;width:${w}%;background:${col(p.k)};--i:${i}" title="${tip}"><span class="gtxt">${lab}</span></div>
@@ -258,7 +248,6 @@ function renderTimeline(){
     ${[...D_.gates.map(g=>({...g,big:1})),...D_.props].map((g,i)=>
       `<div class="mstone" style="left:${pos(g.date)}%;background:${g.big?'var(--accent)':'var(--accent-soft)'};--i:${i}"
         title="${fmt(g.date)} — ${esc(g.t)}"></div>`).join('')}${tl}</div></div>`;
-
   document.getElementById('gateLegend').innerHTML=[...D_.gates,...D_.props]
     .sort((a,b)=>D(a.date)-D(b.date))
     .map(g=>{const d=days(g.date);
@@ -285,6 +274,172 @@ function renderTeam(){
     return `<div class="logrow"><time>${t}</time><b>${esc(c.by||'—')}</b>
       <span>${label[k.split(':')[0]]||k} · ${esc(k.split(':')[1]||'')} → ${esc(v)}</span></div>`;
   }).join(''):'<div class="meta">Изменений пока нет.</div>';
+}
+
+/* ==================================================
+   ПРЕЗЕНТАЦИЯ
+   ================================================== */
+const DECK=D_.deck||[];
+let dIdx=0, dTimer=null, dBuilt=false;
+const words=t=>String(t).split(' ').map((w,i)=>`<span class="w" style="--w:${i}">${esc(w)}</span>`).join(' ');
+const fu=i=>`class="fadeup" style="--i:${i}"`;
+
+function slideHTML(s,n){
+  const head=`<p class="s-eyebrow" ${fu(0)}>${esc(s.eyebrow||'')}</p>
+    <h2 class="s-title">${words(s.title||'')}</h2>`;
+  let body='';
+  if(s.k==='hero'){
+    body=`${s.sub?`<p class="s-sub" ${fu(1)}>${esc(s.sub)}</p>`:''}
+      ${s.foot?`<div class="s-foot" ${fu(2)}>${esc(s.foot)}</div>`:''}`;
+  }
+  if(s.k==='stats'){
+    body=`${s.sub?`<p class="s-sub" ${fu(1)}>${esc(s.sub)}</p>`:''}
+    <div class="s-stats">${s.stats.map((x,i)=>
+      `<div class="s-stat fadeup" style="--i:${i+2}">
+        <b data-num="${(x.pre||'')+x.n}">${(x.pre||'')+nf(x.n)}</b><span>${esc(x.l)}</span></div>`).join('')}</div>`;
+  }
+  if(s.k==='split'){
+    body=`<div class="s-cols">${s.cols.map((c,i)=>
+      `<div class="s-col fadeup" style="--i:${i+1}"><h4>${esc(c.h)}</h4>
+       <ul>${c.items.map(t=>`<li>${esc(t)}</li>`).join('')}</ul></div>`).join('')}</div>`;
+  }
+  if(s.k==='grid'||s.k==='chapters'){
+    body=`<div class="s-grid">${s.cards.map((c,i)=>
+      `<div class="s-cardx fadeup" style="--i:${i+1}"><b>${esc(c.t)}</b>
+       ${c.en?`<i>${esc(c.en)}</i>`:''}${c.v?`<i>${esc(c.v)}</i>`:''}${c.d?`<em>${esc(c.d)}</em>`:''}</div>`).join('')}</div>`;
+  }
+  if(s.k==='curators'){
+    body=`<div class="s-people">${s.people.map((p,i)=>
+      `<div class="s-person fadeup" style="--i:${i+1}"><div class="av">${esc(p.ini)}</div>
+       <h4>${esc(p.n)}</h4><div class="role">${esc(p.r)}</div><p>${esc(p.d)}</p>
+       <ul>${p.works.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></div>`).join('')}</div>`;
+  }
+  if(s.k==='quote'){
+    body=`${s.sub?`<p class="q-sub" ${fu(1)}>${esc(s.sub)}</p>`:''}
+      ${s.lead?`<p class="q-lead" ${fu(2)}>${esc(s.lead)}</p>`:''}
+      <div class="q-body">
+        ${s.text?`<p class="fadeup" style="--i:3">${esc(s.text)}</p>`:''}
+        ${s.tail?`<p class="fadeup" style="--i:4">${esc(s.tail)}</p>`:''}
+      </div>`;
+  }
+  if(s.k==='partners'){
+    body=`<div class="s-groups">${s.groups.map((g,i)=>
+      `<div class="s-group fadeup" style="--i:${i+1}"><h4>${esc(g.h)}</h4>
+       <div class="s-chips">${g.items.map(t=>`<span class="s-chip ${i===0?'strong':''}">${esc(t)}</span>`).join('')}</div>
+      </div>`).join('')}</div>`;
+  }
+  if(s.k==='cta'){
+    const tot=D_.gates.reduce((a,g)=>a+g.chk.length,0);
+    const done=D_.gates.reduce((a,g)=>a+g.chk.filter((_,i)=>getV(`chk:${g.id}-${i}`,false)).length,0);
+    const nx=[...D_.gates,...D_.props].map(g=>({...g,dd:days(g.date)}))
+      .filter(g=>g.dd>=0&&getV('st:'+g.id,'todo')!=='done').sort((a,b)=>a.dd-b.dd)[0];
+    body=`${s.sub?`<p class="s-sub" ${fu(1)}>${esc(s.sub)}</p>`:''}
+    <div class="s-cta">
+      <div class="s-ctacard fadeup" style="--i:2"><b data-num="${nx?nx.dd:0}">${nx?nx.dd:0}</b>
+        <span>дней до ближайшего гейта${nx?'<br>'+esc(nx.t):''}</span></div>
+      <div class="s-ctacard fadeup" style="--i:3"><b data-num="${days('2027-04-28')}">${days('2027-04-28')}</b>
+        <span>дней до вернисажа<br>ANIMA MUNDI, 28.04.2027</span></div>
+      <div class="s-ctacard fadeup" style="--i:4"><b data-num="${Math.round(done/tot*100)}">${Math.round(done/tot*100)}</b>
+        <span>% готовности чек-листов<br>${done} из ${tot} пунктов</span></div>
+      <div class="s-ctacard fadeup" style="--i:5"><b data-num="${D_.projects.filter(p=>p.k!=='ext').length}">${D_.projects.filter(p=>p.k!=='ext').length}</b>
+        <span>проектов в сезоне 2027<br>на шести площадках</span></div>
+    </div>
+    <div class="s-ctabtns fadeup" style="--i:6">
+      <button data-goto="gates">Открыть дедлайны</button>
+      <button class="outline" data-goto="timeline">Таймлайн</button>
+      <button class="outline" data-goto="risks">Риски</button>
+    </div>`;
+  }
+  const scroll=['curators','grid','chapters','partners','split'].includes(s.k)?' scroll':'';
+  return `<article class="slide${scroll}" data-k="${s.k}" data-th="${s.theme||'green'}" data-n="${n}">${head}${body}</article>`;
+}
+function buildDeck(){
+  if(dBuilt||!DECK.length) return;
+  document.getElementById('slides').innerHTML=DECK.map((s,i)=>slideHTML(s,i)).join('');
+  document.getElementById('deckDots').innerHTML=DECK.map((s,i)=>
+    `<i data-go="${i}" title="${esc(s.title||'')}"></i>`).join('');
+  dBuilt=true;
+  deckGo(dIdx,true);
+}
+function deckGo(i,force){
+  if(!DECK.length) return;
+  const n=(i+DECK.length)%DECK.length;
+  if(n===dIdx&&!force) return;
+  const slides=[...document.querySelectorAll('.slide')];
+  slides.forEach((el,k)=>{
+    el.classList.toggle('on',k===n);
+    el.classList.toggle('out',k!==n&&k===dIdx);
+  });
+  dIdx=n;
+  const cur=slides[n];
+  if(cur){
+    const au=document.getElementById('aurora');
+    ['--a1','--a2','--a3'].forEach(v=>au.style.setProperty(v,getComputedStyle(cur).getPropertyValue(v)));
+    cur.scrollTop=0;
+    cur.querySelectorAll('[data-num]').forEach((el,k)=>setTimeout(()=>animNum(el,el.dataset.num,1100),380+k*110));
+  }
+  document.querySelectorAll('#deckDots i').forEach((d,k)=>d.classList.toggle('on',k===n));
+  document.getElementById('deckNum').textContent=String(n+1).padStart(2,'0')+' / '+String(DECK.length).padStart(2,'0');
+  document.querySelector('#deckProg i').style.width=((n+1)/DECK.length*100)+'%';
+}
+const deckNext=()=>deckGo(dIdx+1), deckPrev=()=>deckGo(dIdx-1);
+function deckAuto(on){
+  const b=document.getElementById('deckPlay');
+  if(dTimer){clearInterval(dTimer);dTimer=null}
+  if(on===false){b.classList.remove('on');b.textContent='▶';return}
+  if(on===true||!b.classList.contains('on')){
+    dTimer=setInterval(deckNext,7000);
+    b.classList.add('on'); b.textContent='❚❚';
+  } else {b.classList.remove('on');b.textContent='▶'}
+}
+function deckFull(){
+  const st=document.getElementById('stage');
+  if(document.fullscreenElement||document.webkitFullscreenElement){
+    (document.exitFullscreen||document.webkitExitFullscreen).call(document);
+  } else {
+    (st.requestFullscreen||st.webkitRequestFullscreen).call(st).catch(()=>{});
+  }
+}
+const deckVisible=()=>document.getElementById('deck').classList.contains('on');
+function initDeckUI(){
+  const st=document.getElementById('stage');
+  document.getElementById('deckNext').onclick=deckNext;
+  document.getElementById('deckPrev').onclick=deckPrev;
+  document.getElementById('deckPlay').onclick=()=>deckAuto();
+  document.getElementById('deckFull').onclick=deckFull;
+  document.getElementById('deckDots').onclick=e=>{const i=e.target.dataset.go;if(i!=null)deckGo(+i)};
+  document.getElementById('slides').addEventListener('click',e=>{
+    const b=e.target.closest('[data-goto]');
+    if(b){deckAuto(false);document.querySelector(`nav button[data-t="${b.dataset.goto}"]`).click()}
+  });
+  st.addEventListener('pointermove',e=>{
+    if(RM()) return;
+    const r=st.getBoundingClientRect();
+    st.style.setProperty('--mx',((e.clientX-r.left)/r.width*100).toFixed(1)+'%');
+    st.style.setProperty('--my',((e.clientY-r.top)/r.height*100).toFixed(1)+'%');
+  });
+  st.addEventListener('pointerleave',()=>{st.style.setProperty('--mx','50%');st.style.setProperty('--my','50%')});
+  let sx=0,sy=0;
+  st.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY},{passive:true});
+  st.addEventListener('touchend',e=>{
+    const dx=e.changedTouches[0].clientX-sx, dy=e.changedTouches[0].clientY-sy;
+    if(Math.abs(dx)>52&&Math.abs(dx)>Math.abs(dy)*1.4){deckAuto(false);dx<0?deckNext():deckPrev()}
+  },{passive:true});
+  st.addEventListener('wheel',e=>{
+    if(!document.fullscreenElement) return;
+    if(Math.abs(e.deltaX)>Math.abs(e.deltaY)&&Math.abs(e.deltaX)>40){e.preventDefault();e.deltaX>0?deckNext():deckPrev()}
+  },{passive:false});
+  document.addEventListener('keydown',e=>{
+    if(!deckVisible()) return;
+    if(/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    const k=e.key;
+    if(k==='ArrowRight'||k==='PageDown'||k===' '){e.preventDefault();deckAuto(false);deckNext()}
+    else if(k==='ArrowLeft'||k==='PageUp'){e.preventDefault();deckAuto(false);deckPrev()}
+    else if(k==='Home'){deckGo(0)} else if(k==='End'){deckGo(DECK.length-1)}
+    else if(k==='f'||k==='F'||k==='у'||k==='У'){deckFull()}
+    else if(k==='p'||k==='P'||k==='з'||k==='З'){deckAuto()}
+    else if(k==='Escape'&&dTimer){deckAuto(false)}
+  });
 }
 
 /* ---------- рендер ---------- */
@@ -320,6 +475,8 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   b.classList.add('on');
   document.getElementById(b.dataset.t).classList.add('on');
   if(b.dataset.t==='timeline') requestAnimationFrame(()=>{applyZoom();scrollToToday()});
+  if(b.dataset.t==='deck') requestAnimationFrame(()=>{buildDeck();deckGo(dIdx,true)});
+  else deckAuto(false);
   window.scrollTo({top:0,behavior:'smooth'});
 });
 ['fType','fQ'].forEach(id=>document.getElementById(id).addEventListener('input',renderProjects));
@@ -354,7 +511,6 @@ function askName(){
   if(n!==null){me=n.trim()||'гость';store.set('biennale.me',me);document.getElementById('whoName').textContent=me}
 }
 document.getElementById('whoBtn').onclick=askName;
-
 let rt=null;
 window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(applyZoom,150)});
 window.addEventListener('orientationchange',()=>setTimeout(applyZoom,300));
@@ -368,10 +524,10 @@ if(!LS){
   document.body.prepend(w);
 }
 renderAll();
+initDeckUI();
 if(CFG.API){pull(false);setInterval(()=>pull(true),CFG.POLL_MS||20000);window.addEventListener('focus',()=>pull(true))}
 else setSync('local','локальный режим');
 if(!me) setTimeout(askName,600);
-
 if(window.matchMedia){
   const mq=matchMedia('(prefers-color-scheme: dark)');
   const onTheme=()=>renderTimeline();
