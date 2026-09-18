@@ -8,9 +8,8 @@ const MN=['янв','фев','мар','апр','мая','июн','июл','авг
 const D=s=>new Date(s+'T00:00:00');
 const days=s=>Math.round((D(s)-NOW)/864e5);
 const fmt=s=>{const d=D(s);return `${d.getDate()} ${MN[d.getMonth()]} ${d.getFullYear()} (${WD[d.getDay()]})`};
+const short=s=>{const d=D(s);return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getFullYear()).slice(2)}`};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-
-/* цвета берём из CSS-переменных, чтобы диаграмма жила в светлой и тёмной теме */
 const cssv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const col=k=>cssv('--c-'+k)||cssv('--accent')||'#0071e3';
 
@@ -33,11 +32,9 @@ function setV(k,v){
   clearTimeout(pushTimer); pushTimer=setTimeout(push,900);
 }
 
-/* ---------- синхронизация с Google Sheets ---------- */
-const syncEl=()=>document.getElementById('sync');
-function setSync(cls,txt){const e=syncEl();if(e){e.className='sync '+cls;e.textContent=txt}}
+/* ---------- синхронизация ---------- */
+const setSync=(cls,txt)=>{const e=document.getElementById('sync');if(e){e.className='sync '+cls;e.textContent=txt}};
 const stamp=()=>new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
-
 async function api(method,body){
   const url=CFG.API+(CFG.API.includes('?')?'&':'?')+'token='+encodeURIComponent(CFG.TOKEN||'')+'&t='+Date.now();
   const opt=method==='POST'
@@ -47,38 +44,19 @@ async function api(method,body){
   if(!r.ok) throw new Error('HTTP '+r.status);
   return r.json();
 }
-function merge(serverCells){
-  let changed=0;
-  for(const k in serverCells){
-    const s=serverCells[k], l=cells[k];
-    if(!l||(s.ts||0)>(l.ts||0)){cells[k]=s;changed++}
-  }
-  if(changed){saveLocal()}
-  return changed;
-}
+function merge(sc){let n=0;for(const k in sc){const s=sc[k],l=cells[k];if(!l||(s.ts||0)>(l.ts||0)){cells[k]=s;n++}}if(n)saveLocal();return n}
 async function pull(silent){
   if(!CFG.API){setSync('local','локальный режим');return}
   if(!silent) setSync('wait','загрузка…');
-  try{
-    const r=await api('GET');
-    const n=merge(r.cells||{});
-    setSync('ok','синхронизировано '+stamp());
-    if(n) renderSafe();
-  }catch(e){ setSync('err','нет связи ('+stamp()+')'); }
+  try{const r=await api('GET');const n=merge(r.cells||{});setSync('ok','синхронизировано '+stamp());if(n)renderSafe()}
+  catch(e){setSync('err','нет связи ('+stamp()+')')}
 }
 async function push(){
-  if(!CFG.API||!queue.size){return}
+  if(!CFG.API||!queue.size)return;
   const patch={}; queue.forEach(k=>patch[k]=cells[k]); queue.clear();
   setSync('wait','сохранение…');
-  try{
-    const r=await api('POST',{cells:patch,by:me||'гость'});
-    if(r&&r.cells) merge(r.cells);
-    setSync('ok','сохранено '+stamp());
-  }catch(e){
-    Object.keys(patch).forEach(k=>queue.add(k));
-    setSync('err','не сохранено, повтор через 30 с');
-    setTimeout(push,30000);
-  }
+  try{const r=await api('POST',{cells:patch,by:me||'гость'});if(r&&r.cells)merge(r.cells);setSync('ok','сохранено '+stamp())}
+  catch(e){Object.keys(patch).forEach(k=>queue.add(k));setSync('err','не сохранено, повтор через 30 с');setTimeout(push,30000)}
 }
 
 /* ---------- KPI ---------- */
@@ -96,22 +74,38 @@ function renderKPI(){
    {l:'Просрочено',n:late,d:late?'требует решения сегодня':'нет просроченных',c:late?'hot':'ok'},
    {l:'Критических рисков',n:D_.risks.filter(r=>r.p===1).length,d:'решить до 01.12.2026',c:'hot'}
   ];
-  document.getElementById('kpis').innerHTML=k.map(x=>
-   `<div class="kpi ${x.c}"><div class="l">${x.l}</div><div class="n">${x.n}</div><div class="d">${esc(x.d)}</div></div>`).join('');
+  document.getElementById('kpis').innerHTML=k.map((x,i)=>
+   `<div class="kpi ${x.c}" style="--i:${i}"><div class="l">${x.l}</div>
+    <div class="n" data-val="${esc(x.n)}">${esc(x.n)}</div><div class="d">${esc(x.d)}</div></div>`).join('');
+  countUp();
+}
+/* плавный счёт чисел в KPI */
+function countUp(){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  document.querySelectorAll('.kpi .n').forEach(el=>{
+    const raw=el.dataset.val, m=raw.match(/^(-?\d+)(.*)$/);
+    if(!m) return;
+    const target=+m[1], suffix=m[2], t0=performance.now(), dur=750;
+    const step=t=>{
+      const p=Math.min((t-t0)/dur,1), e=1-Math.pow(1-p,3);
+      el.textContent=Math.round(target*e)+suffix;
+      if(p<1) requestAnimationFrame(step);
+    };
+    el.textContent='0'+suffix; requestAnimationFrame(step);
+  });
 }
 
 /* ---------- гейты ---------- */
 function badge(date,st){
   const d=days(date);
   if(st==='done') return '<span class="dbadge past">закрыто</span>';
-  const c=d<0?'hot':d<30?'hot':d<75?'warn':'';
+  const c=d<0||d<30?'hot':d<75?'warn':'';
   return `<span class="dbadge ${c}">${d<0?'просрочено '+(-d)+' дн.':d+' дн.'}</span>`;
 }
-function gateCard(g,prop){
+function gateCard(g,prop,i){
   const st=getV('st:'+g.id,'todo'), chk=g.chk||[];
-  const done=chk.filter((_,i)=>getV(`chk:${g.id}-${i}`,false)).length;
-  const owner=getV('own:'+g.id,'');
-  return `<div class="card s-${st}">
+  const done=chk.filter((_,n)=>getV(`chk:${g.id}-${n}`,false)).length;
+  return `<div class="card s-${st}" style="--i:${i}">
   <div class="chead">
     <div><div class="ttl">${fmt(g.date)} — ${esc(g.t)} ${prop?'<span class="pill prop">предложение</span>':''}</div>
     <div class="meta">${g.own?'По умолчанию: '+esc(g.own):''}${g.warn?' · ⚠️ '+esc(g.warn):''}</div></div>
@@ -119,20 +113,20 @@ function gateCard(g,prop){
   <div class="ctrls">
     <select data-k="st:${g.id}">${[['todo','Не начато'],['wip','В работе'],['risk','Под риском'],['done','Закрыто']]
       .map(o=>`<option value="${o[0]}" ${st===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>
-    <input type="text" data-k="own:${g.id}" placeholder="Ответственный" value="${esc(owner)}">
+    <input type="text" data-k="own:${g.id}" placeholder="Ответственный" value="${esc(getV('own:'+g.id,''))}">
     ${chk.length?`<span class="pill">${done} / ${chk.length}</span>`:''}
     ${byOf('st:'+g.id)?`<span class="by">статус: ${esc(byOf('st:'+g.id))}</span>`:''}
   </div>
   ${chk.length?`<div class="bar"><i style="width:${done/chk.length*100}%"></i></div>
-  <ul class="chk">${chk.map((c,i)=>{const key=`chk:${g.id}-${i}`,on=getV(key,false);
+  <ul class="chk">${chk.map((c,n)=>{const key=`chk:${g.id}-${n}`,on=getV(key,false);
     return `<li class="${on?'done':''}"><input type="checkbox" data-k="${key}" ${on?'checked':''}>
     <span>${esc(c)}${on&&byOf(key)?`<span class="by">— ${esc(byOf(key))}</span>`:''}</span></li>`}).join('')}</ul>`:''}
   <textarea class="note" data-k="note:${g.id}" placeholder="Заметки, блокеры, решения">${esc(getV('note:'+g.id,''))}</textarea>
   </div>`;
 }
 const renderGates=()=>{
-  document.getElementById('gateList').innerHTML=D_.gates.map(g=>gateCard(g,false)).join('');
-  document.getElementById('propList').innerHTML=D_.props.map(g=>gateCard(g,true)).join('');
+  document.getElementById('gateList').innerHTML=D_.gates.map((g,i)=>gateCard(g,false,i)).join('');
+  document.getElementById('propList').innerHTML=D_.props.map((g,i)=>gateCard(g,true,i)).join('');
 };
 
 /* ---------- проекты ---------- */
@@ -141,14 +135,66 @@ function renderProjects(){
   const f=document.getElementById('fType').value, q=document.getElementById('fQ').value.toLowerCase();
   document.getElementById('projRows').innerHTML=D_.projects
     .filter(p=>(!f||p.f===f)&&(!q||(p.t+p.v+p.c+p.dt).toLowerCase().includes(q)))
-    .map(p=>`<tr><td>${p.n}</td><td><b>${esc(p.t)}</b></td><td>${esc(p.v)}</td>
-      <td><span class="tag ${TAG[p.k]}">${esc(p.f)}</span></td><td>${esc(p.c)}</td><td>${esc(p.dt)}</td>
-      <td>${p.x?'⚠️ '+esc(p.x):'—'}</td></tr>`).join('');
+    .map(p=>`<tr>
+      <td data-label="№">${p.n||'—'}</td>
+      <td data-label="Проект"><b>${esc(p.t)}</b></td>
+      <td data-label="Площадка">${esc(p.v)}</td>
+      <td data-label="Формат"><span class="tag ${TAG[p.k]}">${esc(p.f)}</span></td>
+      <td data-label="Кураторы">${esc(p.c)}</td>
+      <td data-label="Даты">${esc(p.dt)}</td>
+      <td data-label="Риски">${p.x?'⚠️ '+esc(p.x):'—'}</td></tr>`).join('');
 }
 
-/* ---------- таймлайн ---------- */
+/* ---------- таймлайн с зумом ---------- */
 const T0=D('2026-09-01'), T1=D('2027-11-01');
 const pos=d=>((D(d)-T0)/(T1-T0))*100;
+let ZOOM=Math.min(6,Math.max(1,parseFloat(store.get('biennale.zoom')||'1')));
+
+function applyZoom(){
+  const inner=document.getElementById('ginner'), scroll=document.getElementById('gscroll');
+  if(!inner||!scroll) return;
+  const labW=parseInt(cssv('--lab-w'))||250;
+  const base=Math.max(scroll.clientWidth,labW+320);
+  inner.style.minWidth=Math.round(labW+(base-labW)*ZOOM)+'px';
+  const r=document.getElementById('zRange'), v=document.getElementById('zVal');
+  if(r) r.value=Math.round(ZOOM*100);
+  if(v) v.textContent=Math.round(ZOOM*100)+'%';
+  store.set('biennale.zoom',String(ZOOM));
+  requestAnimationFrame(fixLabels);
+}
+function setZoom(z,keepToday){
+  const scroll=document.getElementById('gscroll');
+  const anchor=scroll?(scroll.scrollLeft+scroll.clientWidth/2)/Math.max(scroll.scrollWidth,1):0;
+  ZOOM=Math.min(6,Math.max(1,z));
+  applyZoom();
+  if(scroll){
+    if(keepToday) scrollToToday();
+    else requestAnimationFrame(()=>{scroll.scrollLeft=anchor*scroll.scrollWidth-scroll.clientWidth/2});
+  }
+}
+function scrollToToday(){
+  const scroll=document.getElementById('gscroll'), inner=document.getElementById('ginner');
+  if(!scroll||!inner) return;
+  const labW=parseInt(cssv('--lab-w'))||250;
+  const trackW=inner.offsetWidth-labW-12;
+  const x=labW+trackW*pos(TODAY)/100;
+  scroll.scrollTo({left:Math.max(0,x-scroll.clientWidth/2),behavior:'smooth'});
+}
+/* короткие полосы: подпись выносится наружу */
+function fixLabels(){
+  document.querySelectorAll('.gtrack').forEach(tr=>{
+    const b=tr.querySelector('.gbar'), out=tr.querySelector('.gout');
+    if(!b||!out) return;
+    const tight=b.clientWidth<56||b.scrollWidth>b.clientWidth+1;
+    if(tight){
+      b.classList.add('nolabel'); out.hidden=false;
+      out.style.left='0px'; out.style.right='auto';
+      const right=b.offsetLeft+b.offsetWidth+8;
+      if(right+out.offsetWidth<=tr.clientWidth-4){ out.style.left=right+'px' }
+      else { out.style.left='auto'; out.style.right=(tr.clientWidth-b.offsetLeft+8)+'px' }
+    } else { b.classList.remove('nolabel'); out.hidden=true }
+  });
+}
 function renderTimeline(){
   let gm='';
   for(let y=2026,m=8;!(y===2027&&m===10);m++){
@@ -158,26 +204,36 @@ function renderTimeline(){
     gm+=`<span style="left:${pos(s)}%;width:${pos(nx)-pos(s)}%">${MN[m]} ${String(y).slice(2)}</span>`;
   }
   const tl=`<div class="today" style="left:${pos(TODAY)}%"></div>`;
-  document.getElementById('gm').innerHTML=gm+tl;
+  document.getElementById('gm').innerHTML=gm+`<div class="today" style="left:${pos(TODAY)}%" title="Сегодня"></div>`;
 
-  const rows=[...D_.prep,...D_.projects.filter(p=>p.s)].map(p=>{
-    const l=pos(p.s), w=Math.max(pos(p.e)-l,0.9);
-    return `<div class="grow"><div class="glab" title="${esc(p.t)}">${esc(p.t)}</div>
-     <div class="gtrack"><div class="gbar" style="left:${l}%;width:${w}%;background:${col(p.k)}">${esc(p.dt||'')}</div>${tl}</div></div>`;
-  }).join('');
+  const items=[...D_.prep,...D_.projects.filter(p=>p.s)];
+  document.getElementById('gRows').innerHTML=items.map((p,i)=>{
+    const l=pos(p.s), w=Math.max(pos(p.e)-l,0.35);
+    const lab=esc(p.dt||`${short(p.s)} — ${short(p.e)}`);
+    const tip=esc(p.t)+' · '+lab;
+    return `<div class="grow"><div class="glab" title="${tip}">${esc(p.t)}</div>
+     <div class="gtrack">
+       <div class="gbar" style="left:${l}%;width:${w}%;background:${col(p.k)};--i:${i}" title="${tip}"><span class="gtxt">${lab}</span></div>
+       <span class="gout" hidden>${lab}</span>${tl}
+     </div></div>`;
+  }).join('')+
+   `<div class="grow" style="margin-top:14px"><div class="glab"><b>Гейты</b></div>
+    <div class="gtrack" style="background:transparent;border-top:1px solid var(--hair)">
+    ${[...D_.gates.map(g=>({...g,big:1})),...D_.props].map((g,i)=>
+      `<div class="mstone" style="left:${pos(g.date)}%;background:${g.big?'var(--accent)':'var(--accent-soft)'};--i:${i}"
+        title="${fmt(g.date)} — ${esc(g.t)}"></div>`).join('')}${tl}</div></div>`;
 
-  const ms=[...D_.gates.map(g=>({...g,big:1})),...D_.props].map(g=>
-   `<div class="mstone" style="left:${pos(g.date)}%;background:${g.big?'var(--accent)':'var(--accent-soft)'}" title="${fmt(g.date)} — ${esc(g.t)}"></div>`).join('');
-
-  document.getElementById('gRows').innerHTML=rows+
-   `<div class="grow" style="margin-top:16px"><div class="glab"><b>Гейты</b></div>
-    <div class="gtrack" style="background:transparent;border-top:1px solid var(--hair)">${ms}${tl}</div></div>`;
+  document.getElementById('gateLegend').innerHTML=[...D_.gates,...D_.props]
+    .sort((a,b)=>D(a.date)-D(b.date))
+    .map(g=>{const d=days(g.date);
+      return `<div><b>${short(g.date)}</b><span>${esc(g.t)}</span><em>${d<0?'прошло':d+' дн.'}</em></div>`}).join('');
+  applyZoom();
 }
 
 /* ---------- риски, команда, журнал ---------- */
 function renderRisks(){
   document.getElementById('riskList').innerHTML=[...D_.risks].sort((a,b)=>a.p-b.p).map((r,i)=>
-   `<div class="card risk p${r.p}"><h3>${r.p===1?'Критический':r.p===2?'Высокий':'Средний'} — ${esc(r.t)}</h3>
+   `<div class="card risk p${r.p}" style="--i:${i}"><h3>${r.p===1?'Критический':r.p===2?'Высокий':'Средний'} — ${esc(r.t)}</h3>
     <div class="meta">${esc(r.d)}</div><div class="fix"><b>Что делать:</b> ${esc(r.f)}</div>
     <textarea class="note" data-k="risk:${i}" placeholder="Решение, владелец, срок">${esc(getV('risk:'+i,''))}</textarea></div>`).join('');
 }
@@ -195,11 +251,10 @@ function renderTeam(){
   }).join(''):'<div class="meta">Изменений пока нет.</div>';
 }
 
-/* ---------- рендер с сохранением фокуса ---------- */
+/* ---------- рендер ---------- */
 let renderPending=false;
 function renderAll(){
-  const a=document.activeElement, fk=a&&a.dataset?a.dataset.k:null;
-  const caret=a&&a.selectionStart;
+  const a=document.activeElement, fk=a&&a.dataset?a.dataset.k:null, caret=a&&a.selectionStart;
   renderKPI();renderGates();renderProjects();renderTimeline();renderRisks();renderTeam();
   if(fk){const el=document.querySelector(`[data-k="${fk}"]`);
     if(el){el.focus();try{el.setSelectionRange(caret,caret)}catch(e){}}}
@@ -226,23 +281,36 @@ document.addEventListener('input',e=>{
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('section').forEach(x=>x.classList.remove('on'));
-  b.classList.add('on'); document.getElementById(b.dataset.t).classList.add('on');
+  b.classList.add('on');
+  document.getElementById(b.dataset.t).classList.add('on');
+  if(b.dataset.t==='timeline') requestAnimationFrame(()=>{applyZoom();scrollToToday()});
+  window.scrollTo({top:0,behavior:'smooth'});
 });
 ['fType','fQ'].forEach(id=>document.getElementById(id).addEventListener('input',renderProjects));
+document.getElementById('zIn').onclick=()=>setZoom(ZOOM+0.5);
+document.getElementById('zOut').onclick=()=>setZoom(ZOOM-0.5);
+document.getElementById('zRange').oninput=e=>setZoom(+e.target.value/100);
+document.getElementById('zFit').onclick=()=>setZoom(1);
+document.getElementById('zToday').onclick=scrollToToday;
 document.getElementById('pullBtn').onclick=()=>pull(false);
 document.getElementById('printBtn').onclick=()=>window.print();
-document.getElementById('expBtn').onclick=()=>{
+const doExport=()=>{
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([JSON.stringify(cells,null,2)],{type:'application/json'}));
   a.download='biennale2027-'+TODAY+'.json'; a.click();
 };
+document.getElementById('expBtn').onclick=doExport;
 document.getElementById('impBtn').onclick=()=>document.getElementById('impFile').click();
+document.getElementById('moreBtn').onclick=()=>{
+  const c=prompt('1 — экспорт JSON\n2 — импорт JSON\n3 — печать / PDF\n\nВведите номер:','1');
+  if(c==='1') doExport();
+  if(c==='2') document.getElementById('impFile').click();
+  if(c==='3') window.print();
+};
 document.getElementById('impFile').onchange=function(){
   const f=this.files[0]; if(!f)return; const r=new FileReader();
-  r.onload=()=>{try{
-    const inc=JSON.parse(r.result); merge(inc);
-    Object.keys(inc).forEach(k=>queue.add(k)); push(); renderAll();
-  }catch(e){alert('Не удалось прочитать файл')}};
+  r.onload=()=>{try{const inc=JSON.parse(r.result);merge(inc);Object.keys(inc).forEach(k=>queue.add(k));push();renderAll()}
+  catch(e){alert('Не удалось прочитать файл')}};
   r.readAsText(f);
 };
 function askName(){
@@ -250,6 +318,10 @@ function askName(){
   if(n!==null){me=n.trim()||'гость';store.set('biennale.me',me);document.getElementById('whoName').textContent=me}
 }
 document.getElementById('whoBtn').onclick=askName;
+
+let rt=null;
+window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{applyZoom()},150)});
+window.addEventListener('orientationchange',()=>setTimeout(applyZoom,300));
 
 /* ---------- старт ---------- */
 document.getElementById('today').textContent=fmt(TODAY);
@@ -260,21 +332,15 @@ if(!LS){
   document.body.prepend(w);
 }
 renderAll();
-if(CFG.API){
-  pull(false);
-  setInterval(()=>pull(true),CFG.POLL_MS||20000);
-  window.addEventListener('focus',()=>pull(true));
-} else setSync('local','локальный режим');
+if(CFG.API){pull(false);setInterval(()=>pull(true),CFG.POLL_MS||20000);window.addEventListener('focus',()=>pull(true))}
+else setSync('local','локальный режим');
 if(!me) setTimeout(askName,600);
 
-/* перерисовка диаграммы при переключении светлой и тёмной темы macOS */
 if(window.matchMedia){
   const mq=matchMedia('(prefers-color-scheme: dark)');
   const onTheme=()=>renderTimeline();
   mq.addEventListener?mq.addEventListener('change',onTheme):mq.addListener(onTheme);
 }
-
-/* если дашборд открыт круглосуточно — пересчёт после полуночи */
 setInterval(()=>{
   const d=new Date(); d.setHours(0,0,0,0);
   if(d.getTime()!==NOW.getTime()) location.reload();
