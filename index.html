@@ -49,6 +49,7 @@
       <button data-t="timeline">Таймлайн</button>
       <button data-t="risks">Риски</button>
       <button data-t="team">Команда</button>
+      <button data-t="deck" class="accented">Презентация</button>
     </div>
   </div>
 </nav>
@@ -120,6 +121,26 @@
     <textarea class="note big" data-k="team:decisions" placeholder="Дата — решение — кто — срок"></textarea>
     <h2>Журнал изменений</h2>
     <div id="log" class="panel pad"></div>
+  </section>
+
+  <section id="deck">
+    <h2>Презентация Биеннале</h2>
+    <p class="hint">Стрелки ← → или пробел, свайп на телефоне, клик по краям слайда. <b>F</b> — полный экран, <b>P</b> — автопоказ, <b>Esc</b> — выход.</p>
+    <div class="stage" id="stage">
+      <div class="aurora" id="aurora"><i></i><i></i><i></i></div>
+      <div class="slides" id="slides"></div>
+      <button class="edge left"  id="deckPrev" aria-label="Назад"><span>‹</span></button>
+      <button class="edge right" id="deckNext" aria-label="Вперёд"><span>›</span></button>
+      <div class="deckbar">
+        <div class="dots" id="deckDots"></div>
+        <div class="deckctl">
+          <span class="counter" id="deckNum">01 / 09</span>
+          <button id="deckPlay" class="dbtn" title="Автопоказ (P)">▶</button>
+          <button id="deckFull" class="dbtn" title="Полный экран (F)">⤢</button>
+        </div>
+      </div>
+      <div class="progress" id="deckProg"><i></i></div>
+    </div>
   </section>
 </main>
 
